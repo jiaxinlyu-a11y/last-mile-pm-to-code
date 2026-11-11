@@ -1,0 +1,1052 @@
+{
+ "lang": "en",
+ "project": {
+  "name": "Fiction Workbench",
+  "summary": "A local, single-user workspace for planning and writing long novels. It organises outlines, characters and chapters as Markdown and JSON files, and compiles a bounded writing brief that the user hands to Codex. The app itself never calls an AI API. Every statement below was checked against the source code."
+ },
+ "flows": [
+  {
+   "id": "flow-a",
+   "name": "Create a novel project",
+   "scene": "On the Project Library page you fill in a title, a project ID and a language, then click Create.",
+   "steps": [
+    {
+     "title": "Submit the form",
+     "what": "The form sends its fields to a backend function and shows any field errors next to the inputs.",
+     "layer": "Interface",
+     "tech": [
+      [
+       "React",
+       "Draws the form and shows the result message"
+      ],
+      [
+       "Next.js Server Actions",
+       "The form calls the backend function createNovelProjectAction directly"
+      ]
+     ],
+     "files": [
+      [
+       "src/ui/project-library.tsx",
+       "Project Library page: project list and the create form",
+       null
+      ],
+      [
+       "src/app/page.tsx",
+       "Home page that shows the library",
+       null
+      ]
+     ]
+    },
+    {
+     "title": "Validate the input",
+     "what": "Every field is checked against a set of rules before anything touches the disk. Bad input returns an error per field; the chosen genres and styles must exist in the shared library.",
+     "layer": "Application",
+     "tech": [
+      [
+       "Zod",
+       "Rule sheet for the input: ID format, title length, locale format"
+      ],
+      [
+       "try / catch",
+       "Turns storage errors into a readable message"
+      ]
+     ],
+     "files": [
+      [
+       "src/app/actions.ts",
+       "Backend entry for project actions",
+       "createNovelProjectAction"
+      ],
+      [
+       "src/modules/novel/validation/create-novel-project-input.ts",
+       "Rules for the create form",
+       null
+      ],
+      [
+       "src/core/validation/project-id.ts",
+       "Rule for safe project IDs (lowercase letters, digits, hyphens)",
+       "projectIdSchema"
+      ]
+     ]
+    },
+    {
+     "title": "Build the project manifest",
+     "what": "Creates the project's identity card (project.json) with a schema version, timestamps and the list of folders a novel project needs.",
+     "layer": "Rules & validation",
+     "tech": [
+      [
+       "Schema version field",
+       "Stored in project.json so future versions can upgrade old projects"
+      ]
+     ],
+     "files": [
+      [
+       "src/modules/novel/application/create-novel-project.ts",
+       "Assembles a new novel project",
+       "createNovelProject"
+      ]
+     ]
+    },
+    {
+     "title": "Write it all-or-nothing",
+     "what": "Everything is first written into a hidden temporary folder. Each path is checked to stay inside that folder. Only when all files are in place is the folder renamed to its real name; on any error the temporary folder is deleted.",
+     "layer": "Data access → Storage",
+     "tech": [
+      [
+       "Node.js file system (fs)",
+       "mkdir, writeFile and rename"
+      ],
+      [
+       "Staging folder + rename",
+       "A half-created project can never appear"
+      ],
+      [
+       "Path guard",
+       "assertPathWithinRoot rejects any path that escapes the folder"
+      ]
+     ],
+     "files": [
+      [
+       "src/infrastructure/filesystem/projects-root.ts",
+       "All reading and writing of project folders",
+       "createProject, assertPathWithinRoot"
+      ],
+      [
+       "fiction-projects/<project-id>/project.json",
+       "The new project's manifest",
+       null
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "flow-b",
+   "name": "Save a chapter",
+   "scene": "You edit the outline, text or summary of a chapter and click Save.",
+   "steps": [
+    {
+     "title": "Send the text and its fingerprint",
+     "what": "The editor sends the text plus the fingerprint (revision) of the version you opened.",
+     "layer": "Interface",
+     "tech": [
+      [
+       "React",
+       "Holds the editor text and shows “unsaved changes”"
+      ],
+      [
+       "Next.js Server Actions",
+       "Calls saveChapterDocumentAction"
+      ]
+     ],
+     "files": [
+      [
+       "src/modules/novel/ui/chapter-editor.tsx",
+       "The chapter editor screen",
+       "persist: runs when you click Save"
+      ]
+     ]
+    },
+    {
+     "title": "Check the input",
+     "what": "The request must name a valid project, volume and chapter, the text must be under 4 MiB, and the fingerprint must be 64 characters long.",
+     "layer": "Application",
+     "tech": [
+      [
+       "Zod",
+       "saveChapterDocumentInputSchema"
+      ]
+     ],
+     "files": [
+      [
+       "src/modules/novel/validation/chapter.ts",
+       "All rules for chapters",
+       "saveChapterDocumentInputSchema"
+      ],
+      [
+       "src/app/projects/[projectId]/volumes/[volumeId]/chapters/actions.ts",
+       "Backend entry for chapter actions (not readable in this test: path too deeply nested)",
+       "saveChapterDocumentAction"
+      ]
+     ]
+    },
+    {
+     "title": "Refuse if the file changed elsewhere",
+     "what": "The store re-reads the chapter and compares fingerprints. If the file on disk changed after you opened it (for example, Codex wrote to it), saving is refused with “changed on disk, please refresh”.",
+     "layer": "Data access",
+     "tech": [
+      [
+       "SHA-256 fingerprint",
+       "revision() turns a file's text into a 64-character fingerprint"
+      ]
+     ],
+     "files": [
+      [
+       "src/infrastructure/filesystem/chapter-store.ts",
+       "All reading and writing of chapters",
+       "saveChapterDocument"
+      ]
+     ]
+    },
+    {
+     "title": "Write safely, then update metadata",
+     "what": "The text goes to a temporary file, is flushed to disk, then renamed over the real file. Then meta.json gets a new updated time. New fingerprints go back to the editor.",
+     "layer": "Data access → Storage",
+     "tech": [
+      [
+       "Temporary file + fsync + rename",
+       "writeStaged: the real file is never half-written"
+      ]
+     ],
+     "files": [
+      [
+       "src/infrastructure/filesystem/chapter-store.ts",
+       "All reading and writing of chapters",
+       "writeStaged, writeJson"
+      ],
+      [
+       "fiction-projects/<id>/novel/volumes/<volume>/chapters/<chapter>/content.md",
+       "Chapter text",
+       null
+      ],
+      [
+       "…/chapters/<chapter>/meta.json",
+       "Chapter number, title, status, timestamps",
+       null
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "flow-c",
+   "name": "Hand a chapter to Codex",
+   "scene": "On a chapter page you open the Codex writing panel and click Copy.",
+   "steps": [
+    {
+     "title": "Compile a bounded brief",
+     "what": "The app collects only what this chapter needs: the chapter outline; project, world, style and volume notes; one character card per selected character (with their relationships and personality-based guidance); a short prose sample; and the ending of the previous chapter.",
+     "layer": "Application",
+     "tech": [
+      [
+       "Next.js server rendering",
+       "The brief is assembled on the server when the chapter page loads"
+      ],
+      [
+       "Character projection",
+       "Merges profile, personality and relationships into one card per character"
+      ]
+     ],
+     "files": [
+      [
+       "src/modules/novel/application/chapter-drafting-context.ts",
+       "Gathers the materials for one chapter",
+       "resolveChapterDraftingContext"
+      ],
+      [
+       "src/modules/novel/application/character-profile-projection.ts",
+       "Builds the per-character card",
+       null
+      ]
+     ]
+    },
+    {
+     "title": "Trim the previous chapter",
+     "what": "Only the ending of the previous chapter is passed on: the whole text if it is 1,200 characters or less, otherwise about the last 1,000 characters, cut at a paragraph or line break.",
+     "layer": "Application",
+     "tech": [
+      [
+       "Plain TypeScript",
+       "endingExcerpt counts Unicode characters and looks for a break"
+      ]
+     ],
+     "files": [
+      [
+       "src/modules/novel/application/previous-chapter-handoff.ts",
+       "Previous-chapter ending",
+       "endingExcerpt"
+      ]
+     ]
+    },
+    {
+     "title": "Turn it into an instruction",
+     "what": "The IDs and word targets are validated again, and the brief is serialised as JSON between <compiled_chapter_context> tags, with the name of the Codex skill to call and the one file it may write.",
+     "layer": "Application",
+     "tech": [
+      [
+       "Zod",
+       "Validates IDs and the word range"
+      ],
+      [
+       "JSON",
+       "The brief is machine-readable for the Codex skill"
+      ]
+     ],
+     "files": [
+      [
+       "src/modules/novel/application/chapter-drafting-task.ts",
+       "Builds the text you paste into Codex",
+       "createChapterDraftingTaskFromContext"
+      ]
+     ]
+    },
+    {
+     "title": "Copy to clipboard",
+     "what": "Clicking Copy puts the instruction on the clipboard and shows a confirmation.",
+     "layer": "Interface",
+     "tech": [
+      [
+       "Browser Clipboard API",
+       "navigator.clipboard.writeText"
+      ]
+     ],
+     "files": [
+      [
+       "src/ui/codex-task-panel.tsx",
+       "The Codex writing panel",
+       "copyTask"
+      ]
+     ]
+    },
+    {
+     "title": "Codex writes the chapter",
+     "what": "In VS Code, Codex runs the project's own skill. It re-checks every ID and path, refuses links that escape the project, and writes only that chapter's content.md. It does not change outlines, metadata or status.",
+     "layer": "External AI",
+     "tech": [
+      [
+       "Codex skill (SKILL.md)",
+       "Written rules Codex must follow"
+      ]
+     ],
+     "files": [
+      [
+       ".agents/skills/novel-chapter-drafting/SKILL.md",
+       "The drafting rules for Codex",
+       null
+      ],
+      [
+       "…/chapters/<chapter>/content.md",
+       "The only file Codex writes",
+       null
+      ]
+     ]
+    },
+    {
+     "title": "Back in the app",
+     "what": "When you reopen the chapter, the editor shows the new text with a new fingerprint. If you had unsaved edits open from before, saving them is refused (see Flow B), so Codex's text is not overwritten by accident. Chapter status changes only when you change it.",
+     "layer": "Interface → Data access",
+     "tech": [
+      [
+       "SHA-256 fingerprint",
+       "Detects that the file changed"
+      ]
+     ],
+     "files": [
+      [
+       "src/infrastructure/filesystem/chapter-store.ts",
+       "All reading and writing of chapters",
+       "loadChapter, saveChapterDocument"
+      ]
+     ]
+    }
+   ],
+   "note": "The chapter page file that wires steps 1–4 together (src/app/projects/[projectId]/volumes/[volumeId]/chapters/[chapterId]/page.tsx) could not be read in this test because the path is too deeply nested for the file bridge."
+  },
+  {
+   "id": "flow-d",
+   "name": "Delete a chapter and restore it",
+   "scene": "You delete a chapter, then open the project's recycle bin and restore it.",
+   "steps": [
+    {
+     "title": "Confirm by typing the ID",
+     "what": "Deleting requires typing the full chapter ID. A mismatch stops the deletion.",
+     "layer": "Interface → Application",
+     "tech": [
+      [
+       "Confirmation dialog",
+       "The user must type the exact ID"
+      ]
+     ],
+     "files": [
+      [
+       "src/infrastructure/filesystem/chapter-store.ts",
+       "All reading and writing of chapters",
+       "recoverablyDeleteChapter: stops if the typed ID does not match"
+      ]
+     ]
+    },
+    {
+     "title": "Move, don't delete",
+     "what": "The chapter folder is moved into .fiction-workbench/recovery/chapters/<volume>/<chapter>-<time>. Every folder on the way is checked to be a real folder inside the project, not a link pointing elsewhere.",
+     "layer": "Data access → Storage",
+     "tech": [
+      [
+       "rename",
+       "Moves the whole folder in one step"
+      ],
+      [
+       "lstat + realpath",
+       "Reject symbolic links and paths outside the project"
+      ]
+     ],
+     "files": [
+      [
+       "src/infrastructure/filesystem/chapter-store.ts",
+       "All reading and writing of chapters",
+       "recoverablyDeleteChapter, safeDirectory"
+      ],
+      [
+       "fiction-projects/<id>/.fiction-workbench/recovery/",
+       "Recycle bin storage",
+       null
+      ]
+     ]
+    },
+    {
+     "title": "Restore",
+     "what": "Restoring checks that nothing with the same ID now sits in the original place (it never overwrites), moves the folder back, and updates the book structure. If updating the structure fails, the move is undone and the item stays in the recycle bin.",
+     "layer": "Application → Data access",
+     "tech": [
+      [
+       "Next.js Server Actions",
+       "restoreProjectRecoveryAction"
+      ],
+      [
+       "Zod",
+       "Re-validates the stored JSON before using it"
+      ],
+      [
+       "Undo on failure",
+       "Moves the folder back if the second step fails"
+      ]
+     ],
+     "files": [
+      [
+       "src/app/projects/[projectId]/recycle-bin/actions.ts",
+       "Backend entry for recycle bin actions",
+       "restoreProjectRecoveryAction"
+      ],
+      [
+       "src/infrastructure/filesystem/recycle-bin-store.ts",
+       "Recycle bin logic",
+       "restore"
+      ],
+      [
+       "fiction-projects/<id>/novel/planning/book-structure.json",
+       "Order of volumes and chapters",
+       null
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "flow-e",
+   "name": "Delete a whole project",
+   "scene": "On the Project Library page you delete a project.",
+   "steps": [
+    {
+     "title": "Confirm by typing the ID",
+     "what": "You must type the exact project ID.",
+     "layer": "Interface → Application",
+     "tech": [
+      [
+       "Next.js Server Actions",
+       "deleteProjectAction"
+      ]
+     ],
+     "files": [
+      [
+       "src/app/actions.ts",
+       "Backend entry for project actions",
+       "deleteProjectAction"
+      ]
+     ]
+    },
+    {
+     "title": "Delete permanently",
+     "what": "The project path must sit directly inside the projects folder; then the whole folder is removed. There is no recycle bin for whole projects.",
+     "layer": "Data access → Storage",
+     "tech": [
+      [
+       "Node.js rm",
+       "Recursive delete"
+      ],
+      [
+       "Path check",
+       "Refuses anything that is not a direct child of the projects folder"
+      ]
+     ],
+     "files": [
+      [
+       "src/infrastructure/filesystem/projects-root.ts",
+       "All reading and writing of project folders",
+       "deleteProject"
+      ]
+     ]
+    }
+   ],
+   "note": "The README says deleted projects are moved to fiction-projects/.trash/. The code deletes them permanently, and the success message says “permanently deleted”. The code is correct; the README is out of date."
+  }
+ ],
+ "other_flows_note": "Characters, volumes, relationships, timeline and foreshadowing records follow the same pattern: form → Server Action → Zod validation → file store with fingerprint check and temporary-file write. Shared libraries (personalities, emotions, prose rules) work the same way under fiction-library/.",
+ "tree": [
+  [
+   0,
+   "FictionWorkspace/",
+   "Workspace: app code and writing data kept apart",
+   true,
+   ""
+  ],
+  [
+   1,
+   "AGENTS.md",
+   "Workspace rules for AI agents: what each folder may contain",
+   false,
+   "Docs"
+  ],
+  [
+   1,
+   "fiction-workbench/",
+   "The application (its own Git repository)",
+   true,
+   ""
+  ],
+  [
+   2,
+   "AGENTS.md",
+   "Development rules: layers, safety, what not to build",
+   false,
+   "Docs"
+  ],
+  [
+   2,
+   "README.md",
+   "How to run; storage layout (partly out of date)",
+   false,
+   "Docs"
+  ],
+  [
+   2,
+   "docs/",
+   "Architecture, product spec, writing workflow, V1 status",
+   true,
+   "Docs"
+  ],
+  [
+   2,
+   "package.json",
+   "Dependencies and commands (dev, build, lint, test)",
+   false,
+   "Dev tools"
+  ],
+  [
+   2,
+   "vitest.config.mts",
+   "Which test files run",
+   false,
+   "Dev tools"
+  ],
+  [
+   2,
+   "tsconfig.json · eslint.config.mjs · next.config.ts · postcss.config.mjs",
+   "TypeScript, lint, Next.js and style settings",
+   false,
+   "Dev tools"
+  ],
+  [
+   2,
+   ".gitignore",
+   "Keeps dependencies, build output and .env files out of Git",
+   false,
+   "Dev tools"
+  ],
+  [
+   2,
+   ".agents/skills/novel-chapter-drafting/SKILL.md",
+   "Rules Codex follows when drafting a chapter",
+   false,
+   "External AI"
+  ],
+  [
+   2,
+   "scripts/",
+   "One-off data migration scripts, each with a test",
+   true,
+   "Dev tools"
+  ],
+  [
+   2,
+   "src/app/",
+   "Pages and Server Actions (Next.js routes = folders)",
+   true,
+   ""
+  ],
+  [
+   3,
+   "page.tsx · layout.tsx",
+   "Home page and shared frame",
+   false,
+   "Interface"
+  ],
+  [
+   3,
+   "actions.ts",
+   "Create / delete project",
+   false,
+   "Application"
+  ],
+  [
+   3,
+   "library/…",
+   "Shared libraries: personalities, emotions, prose rules, options",
+   true,
+   "Interface + Application"
+  ],
+  [
+   3,
+   "projects/[projectId]/…",
+   "Project pages: planning, characters, volumes, chapters, records, recycle bin; each folder has page.tsx (screen) and actions.ts (backend)",
+   true,
+   "Interface + Application"
+  ],
+  [
+   2,
+   "src/ui/",
+   "Shared screens and widgets (library, Codex panel, confirm dialog, recycle bin)",
+   true,
+   "Interface"
+  ],
+  [
+   2,
+   "src/core/",
+   "Medium-neutral core: project, validation rules, shared logic",
+   true,
+   ""
+  ],
+  [
+   3,
+   "domain/",
+   "Data shapes and schema versions",
+   true,
+   "Rules & validation"
+  ],
+  [
+   3,
+   "validation/",
+   "Zod rules: project ID, manifest, character expression",
+   true,
+   "Rules & validation"
+  ],
+  [
+   3,
+   "application/",
+   "Shared use cases (load project, expression library)",
+   true,
+   "Application"
+  ],
+  [
+   2,
+   "src/modules/novel/",
+   "Everything specific to novels",
+   true,
+   ""
+  ],
+  [
+   3,
+   "domain/",
+   "Chapter, volume, character, book structure shapes",
+   true,
+   "Rules & validation"
+  ],
+  [
+   3,
+   "validation/",
+   "Zod rules for chapters, volumes, characters, records",
+   true,
+   "Rules & validation"
+  ],
+  [
+   3,
+   "application/",
+   "Novel logic: drafting context, Codex task, previous-chapter handoff, projections",
+   true,
+   "Application"
+  ],
+  [
+   3,
+   "ui/",
+   "Novel screens: chapter editor, volume list, character graph",
+   true,
+   "Interface"
+  ],
+  [
+   2,
+   "src/infrastructure/filesystem/",
+   "The only code that touches the disk: one store per data type, each with a test",
+   true,
+   "Data access"
+  ],
+  [
+   2,
+   "**/*.test.ts(x)",
+   "54 test files next to the code they test",
+   false,
+   "Dev tools"
+  ],
+  [
+   1,
+   "fiction-projects/<project-id>/",
+   "One folder per novel (writing data, outside the app's Git)",
+   true,
+   "Storage"
+  ],
+  [
+   2,
+   "project.json",
+   "Project manifest with schema version",
+   false,
+   "Storage"
+  ],
+  [
+   2,
+   "novel/planning/",
+   "Project, world, style guide, prose sample, book-structure.json",
+   true,
+   "Storage"
+  ],
+  [
+   2,
+   "novel/characters/<id>/",
+   "profile.md, meta.json, expression.json per character",
+   true,
+   "Storage"
+  ],
+  [
+   2,
+   "novel/volumes/<id>/chapters/<id>/",
+   "outline.md, content.md, summary.md, meta.json, character-tasks.json",
+   true,
+   "Storage"
+  ],
+  [
+   2,
+   ".fiction-workbench/recovery/",
+   "Recycle bin for deleted characters, volumes, chapters",
+   true,
+   "Storage"
+  ],
+  [
+   1,
+   "fiction-library/",
+   "Shared libraries used by all projects (JSON entries + index)",
+   true,
+   "Storage"
+  ],
+  [
+   1,
+   "references/",
+   "Two external open-source projects kept read-only for study",
+   true,
+   "Docs"
+  ],
+  [
+   1,
+   "migration-backups/",
+   "Backups made before a data migration",
+   true,
+   "Storage"
+  ]
+ ],
+ "arch_mermaid": "flowchart TB\n  subgraph LOCAL[\"Your computer (runs locally, no cloud)\"]\n    direction TB\n    UI[\"<b>Interface</b>: React 19 · Tailwind CSS 4<br/>Screens, forms, buttons\"]\n    APP[\"<b>Application</b>: Next.js 16 Server Actions · Zod<br/>Validates input and runs each action\"]\n    DAL[\"<b>Data access</b>: file stores · SHA-256 · staged writes<br/>The only code that reads and writes files\"]\n    subgraph STORE[\"Storage (no database)\"]\n      direction LR\n      MD[\"Markdown<br/>outlines · chapter text · profiles\"]\n      JS[\"JSON<br/>manifests · metadata · structure\"]\n    end\n    UI --> APP --> DAL --> STORE\n  end\n  AI[\"<b>External AI</b>: Codex (VS Code)<br/>Follows SKILL.md, writes one content.md\"]\n  MD <-->|brief / chapter text| AI\n  DEV[\"<b>Dev tools</b> (not part of the running app)<br/>TypeScript · ESLint · Vitest · Git\"]\n  LOCAL ~~~ DEV",
+ "dataflow_mermaid": "flowchart LR\n  U[\"You<br/>in the browser\"] --> FE[\"Interface<br/>React\"]\n  FE -->|Server Action| BE[\"Application<br/>Zod checks\"]\n  BE --> ST[\"File stores<br/>path guard · fingerprint\"]\n  ST --> F[(\"fiction-projects/<br/>Markdown + JSON\")]\n  BE -->|compile brief| P[\"Codex panel<br/>copy to clipboard\"]\n  P --> C[\"Codex<br/>novel-chapter-drafting\"]\n  C -->|writes one chapter| F\n  ST -->|delete| R[\".fiction-workbench/recovery<br/>recycle bin\"]\n  R -->|restore, never overwrite| F",
+ "tech": [
+  [
+   "Next.js 16",
+   "The app's skeleton: pages and backend in one project",
+   "Application",
+   "Routes in src/app/, Server Actions in actions.ts files"
+  ],
+  [
+   "React 19",
+   "Building blocks for screens",
+   "Interface",
+   "Editors, forms, panels"
+  ],
+  [
+   "Tailwind CSS 4",
+   "Short class names for styling",
+   "Interface",
+   "Look of every screen"
+  ],
+  [
+   "TypeScript",
+   "JavaScript with type checks that catch mistakes early",
+   "Dev tools",
+   "All source code"
+  ],
+  [
+   "Zod",
+   "A rule sheet that every piece of data must pass",
+   "Rules & validation",
+   "Form input and every JSON file read from disk"
+  ],
+  [
+   "Markdown files",
+   "Plain text with light formatting",
+   "Storage",
+   "Chapter text, outlines, profiles, planning notes"
+  ],
+  [
+   "JSON files",
+   "Structured text, like a form",
+   "Storage",
+   "Manifests, metadata, book structure, libraries"
+  ],
+  [
+   "SHA-256",
+   "A fingerprint of a file; one changed letter changes it",
+   "Data access",
+   "Detects files changed elsewhere before saving"
+  ],
+  [
+   "Node.js fs",
+   "The tool that reads, writes, moves and deletes files",
+   "Data access",
+   "All file stores"
+  ],
+  [
+   "Vitest",
+   "Automatic exam for the code",
+   "Dev tools",
+   "54 test files; npm test"
+  ],
+  [
+   "ESLint",
+   "Code style checker",
+   "Dev tools",
+   "npm run lint"
+  ],
+  [
+   "Git",
+   "Save points you can go back to",
+   "Dev tools",
+   "The app repository"
+  ],
+  [
+   "Codex (VS Code)",
+   "AI writer",
+   "External AI",
+   "Drafts one chapter from the brief; the app calls no AI API"
+  ]
+ ],
+ "storage": [
+  [
+   "fiction-projects/<id>/project.json",
+   "Project identity: ID, title, language, genres, schema version",
+   "One small file per project; validated with Zod on every read"
+  ],
+  [
+   "…/novel/planning/*.md and book-structure.json",
+   "Project, world and style notes; order of volumes and chapters",
+   "Human-readable, editable in VS Code; the structure file is the single source of order"
+  ],
+  [
+   "…/novel/characters/<id>/",
+   "Profile (Markdown) plus metadata and expression binding (JSON)",
+   "Profiles are prose for people and AI; JSON holds IDs and links"
+  ],
+  [
+   "…/novel/volumes/<id>/chapters/<id>/",
+   "Outline, text, optional summary, metadata, character tasks",
+   "One folder per chapter so it can be moved, deleted and restored as a unit"
+  ],
+  [
+   "…/.fiction-workbench/recovery/",
+   "Deleted characters, volumes and chapters",
+   "Inside the project, so deleting is reversible"
+  ],
+  [
+   "fiction-library/",
+   "Shared personalities, emotions, prose rules, project options",
+   "Reused across projects; kept outside any single project"
+  ]
+ ],
+ "checklist": [
+  [
+   "Access boundaries",
+   "done",
+   "Project and chapter IDs must match a safe pattern; every path is checked to stay inside the project; symbolic links are rejected; data is only read from fiction-projects/. No login (single local user).",
+   "projects-root.ts (assertPathWithinRoot), chapter-store.ts (safeDirectory)"
+  ],
+  [
+   "Read-back after writes",
+   "done",
+   "Each save returns freshly re-read data and new fingerprints; restore re-validates stored JSON with Zod before using it.",
+   "chapter-store.ts (saveChapterDocument → loadChapter)"
+  ],
+  [
+   "Failure recovery",
+   "done",
+   "Temporary file + fsync + rename for every write; new projects are built in a staging folder; a failed restore is undone.",
+   "chapter-store.ts (writeStaged), projects-root.ts (createProject), recycle-bin-store.ts (restore)"
+  ],
+  [
+   "Human confirmation",
+   "done",
+   "Typing the exact ID is required to delete a chapter or a project; chapter status only changes when the user sets it.",
+   "chapter-store.ts (recoverablyDeleteChapter), projects-root.ts (deleteProject)"
+  ],
+  [
+   "Input validation",
+   "done",
+   "Zod rules for every form; stored JSON is validated with Zod when it is read.",
+   "src/core/validation/, src/modules/novel/validation/"
+  ],
+  [
+   "Data versions & migration",
+   "done",
+   "schemaVersion in every JSON file; old formats are converted when read; one-off migration scripts back up data first and have tests.",
+   "project-manifest.ts, scripts/migrate-*.mjs"
+  ],
+  [
+   "Automated tests",
+   "done",
+   "54 Vitest test files. Note: one test file (src/ui/character-expression-workspace.test.tsx) is not in the vitest include list, so it does not run.",
+   "vitest.config.mts"
+  ],
+  [
+   "Privacy & secrets",
+   "done",
+   "Writing data lives outside the app's Git repository; .env files are ignored.",
+   "AGENTS.md, .gitignore"
+  ],
+  [
+   "Scope control",
+   "done",
+   "AGENTS.md lists what V1 must not include: AI APIs, database, cloud sync, RAG, autonomous agents.",
+   "AGENTS.md"
+  ],
+  [
+   "Logging",
+   "missing",
+   "No logging was found in the files read; errors are shown to the user as messages only.",
+   ""
+  ],
+  [
+   "Backup & rollback",
+   "partial",
+   "Recycle bin for characters, volumes and chapters; migration backups. Whole-project deletion is permanent; writing data is not under Git.",
+   "recycle-bin-store.ts, migration-backups/"
+  ],
+  [
+   "Audit trail",
+   "missing",
+   "No record of who changed what and when, beyond file timestamps.",
+   ""
+  ]
+ ],
+ "quiz": [
+  {
+   "type": "Frontend vs backend",
+   "question": "When you click Save in the chapter editor, how does the screen reach the backend? How can you tell which files run in the browser?",
+   "answer": "The editor calls a Next.js Server Action. Files that start with \"use client\" run in the browser; actions.ts files start with \"use server\" and run only on the server."
+  },
+  {
+   "type": "Why data is stored this way",
+   "question": "Why does this project use Markdown and JSON files instead of a database?",
+   "answer": "So that the user and Codex can open and edit the same files in VS Code, every change is readable, and each chapter is a folder that can be moved to the recycle bin and back. JSON holds the structured parts and is checked with Zod."
+  },
+  {
+   "type": "What if something fails",
+   "question": "Codex rewrites a chapter while you still have the old version open in the editor. What happens when you click Save?",
+   "answer": "The save is refused: the fingerprint of the file on disk no longer matches the one you opened, so you are asked to refresh."
+  },
+  {
+   "type": "What if something fails",
+   "question": "Restoring a chapter fails half-way. Is anything lost?",
+   "answer": "No. If the book structure cannot be updated, the folder is moved back into the recycle bin and an error is shown."
+  },
+  {
+   "type": "How the AI is constrained",
+   "question": "How is Codex kept from writing outside one chapter?",
+   "answer": "The app gives it a bounded brief with exact IDs and one output path; the Codex skill re-validates IDs and paths, rejects links, and may only write that chapter's content.md."
+  },
+  {
+   "type": "What's missing for launch",
+   "question": "What would this tool need before many people could use it online?",
+   "table": {
+    "headers": [
+     "#",
+     "Feature",
+     "Purpose",
+     "Now (local, one user)",
+     "Needed (online, many users)"
+    ],
+    "rows": [
+     [
+      "1",
+      "Accounts and login",
+      "Know who is using it",
+      "One user, not needed",
+      "Sign-up and login"
+     ],
+     [
+      "2",
+      "Per-user data",
+      "Each person sees only their own novels",
+      "All projects in one folder",
+      "Separate data per user"
+     ],
+     [
+      "3",
+      "Shared storage",
+      "Many people saving at once",
+      "Local files",
+      "A server database or cloud storage with locking"
+     ],
+     [
+      "4",
+      "Hosting",
+      "Reach it by web address",
+      "Runs on localhost",
+      "Deploy to a server with HTTPS"
+     ],
+     [
+      "5",
+      "Backups",
+      "Recover lost data",
+      "Recycle bin; projects deleted permanently",
+      "Scheduled backups and point-in-time restore"
+     ],
+     [
+      "6",
+      "Audit trail",
+      "Trace who changed what",
+      "None",
+      "Log every important change"
+     ],
+     [
+      "7",
+      "Logs and alerts",
+      "Know when users hit errors",
+      "Messages on screen only",
+      "Stored logs and alerts"
+     ],
+     [
+      "8",
+      "Built-in AI",
+      "Write without copy-paste",
+      "User pastes the brief into Codex",
+      "AI API with cost limits, rate limits and retries"
+     ]
+    ]
+   }
+  }
+ ],
+ "findings": [
+  "The README says deleted projects go to fiction-projects/.trash/; the code deletes them permanently. The README is out of date.",
+  "One test file (src/ui/character-expression-workspace.test.tsx) exists but is not listed in vitest.config.mts, so it never runs.",
+  "Two files under src/app/projects/[projectId]/volumes/[volumeId]/chapters/ could not be read in this test because the path is too deeply nested for the file bridge; their role was inferred from the files that import them."
+ ]
+}
